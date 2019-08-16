@@ -3,7 +3,7 @@ from libs.locater import locater
 from lxml import etree
 from concurrent.futures import ThreadPoolExecutor
 import os
-
+from db.mysql import mysql
 def start():
     url = 'https://www.roblog.top'
     #一些xpath规则
@@ -40,6 +40,7 @@ def start():
     file_path = r'%s/%s.txt' % (os.path.dirname(os.path.abspath(__file__)), 'title')        
     for title_future in title_futures :
         with  open(file_path , 'a+' , encoding = 'utf-8') as f :
+            
             f.write(str(title_future.result()[0])+'\n')
        
     
@@ -55,6 +56,11 @@ def getPage(url , rule):
     g = grabber()
     return etree.HTML(g.sendRquest(url).text).xpath(rule)
     
-start()
+#start()
 
-   
+c = mysql().client
+print(c)
+c = c.cursor()
+c.execute('select * from articles where 1')
+a = c.fetchone()
+print(a)
