@@ -2,15 +2,19 @@ from libs.grabber import grabber
 from libs.locater import locater
 from lxml import etree
 from concurrent.futures import ThreadPoolExecutor
+from lxml.html import fromstring, tostring
 import os
 from db.mysql import mysql
+import chardet
+
+
 def start():
-    url = 'https://www.roblog.top'
+    url = 'http://www.roblog.top'
     #一些xpath规则
     articles_rule = '//div[@id="main"]/article'
     article_url_rule = './h2/a/@href'
     pageinate_rule = '//ol[@class="page-navigator"]/li[last()-1]/a/text()'
-    content_title_rule = '/html/body/div/div/div/div[1]/article/h1/a/text()'
+    title_rule = '/html/body/div/div/div/div[1]/article/h1/a/text()'
 
     #先把首页挖出来
     paginate = getPage(url , pageinate_rule)
@@ -31,17 +35,29 @@ def start():
            
         
     with ThreadPoolExecutor(max_workers = 10) as article_processer:
-        title_futures = []
+        detail_futures = []
         for url in articles_urls:
             #抓文章标题
-            future = article_processer.submit(getPage , url = url , rule = content_title_rule)
-            title_futures.append(future)
+            future = article_processer.submit(getArticlesPage , url = url )
+            detail_futures.append(future)
 
-    file_path = r'%s/%s.txt' % (os.path.dirname(os.path.abspath(__file__)), 'title')        
-    for title_future in title_futures :
-        with  open(file_path , 'a+' , encoding = 'utf-8') as f :
+        insertData = []
+        for detail in detail_futures :
+            insertData.append(detail.result())
             
-            f.write(str(title_future.result()[0])+'\n')
+
+
+    #写入到文件
+    # file_path = r'%s/%s.txt' % (os.path.dirname(os.path.abspath(__file__)), 'title')        
+    # for title_future in title_futures :
+    #     with  open(file_path , 'a+' , encoding = 'utf-8') as f :
+            
+    #         f.write(str(title_future.result()[0])+'\n')
+
+    client = mysql().client
+    c = client.cursor()
+    c.executemany("""INSERT INTO `articles` (`title`,`content`,`url`) VALUES(%s,%s,%s);""",insertData)
+    client.commit()
        
     
     
@@ -49,18 +65,41 @@ def start():
         
     
 
-   
+def getArticlesPage(url):
+    # 格式
+    # [('title' , 'url' , 'content'),('title' , 'url' , 'content'),('title' , 'url' , 'content')]
+    #
+    data = []
+    title_rule = '/html/body/div/div/div/div[1]/article/h1/a/text()'
+    content_rule = '//*[@id="main"]'
+    g = grabber()
+    page = etree.HTML(g.sendRquest(url).text)
+    
+    title = page.xpath(title_rule)
 
+    if title == () :
+        title = ''
+    else:
+        title = title[0]
+
+    content = page.xpath(content_rule)
+
+    if content == () :
+        content = ''
+    else:
+        content = tostring(content[0])
+
+    data.append(title)
+    data.append(content)
+    data.append(url)
+    return tuple(data)
 
 def getPage(url , rule):
     g = grabber()
     return etree.HTML(g.sendRquest(url).text).xpath(rule)
     
-#start()
+start()
 
-c = mysql().client
-print(c)
-c = c.cursor()
-c.execute('select * from articles where 1')
-a = c.fetchone()
-print(a)
+
+
+
