@@ -15,7 +15,6 @@ def start():
     article_url_rule = './h2/a/@href'
     pageinate_rule = '//ol[@class="page-navigator"]/li[last()-1]/a/text()'
     articles_urls = []
-    insertData = []
 
     #先把首页挖出来
     paginate = getPage(url , pageinate_rule)
@@ -31,43 +30,34 @@ def start():
             articles_urls.append({'url':url})
     
     #再开线程抓取每篇文章的内容
-    detail_futures = threadCreate(10 , getArticlesPage , *articles_urls)
-    for detail in detail_futures:
-        insertData.append(detail.result())
-
-    #批量入库 这里需要优化 应该在上一步就入库
-    client = mysql().client
-    c = client.cursor()
-    c.executemany("""INSERT INTO `articles` (`title`,`content`,`url`) VALUES(%s,%s,%s);""",insertData)
-    client.commit()
+    threadCreate(10 , getArticlesPage , *articles_urls)
 
 #专门用来抓取单个文章页
 def getArticlesPage(url):
-    data = []
     title_rule = '/html/body/div/div/div/div[1]/article/h1/a/text()'
     content_rule = '//*[@id="main"]'
     g = grabber()
-    page = etree.HTML(g.sendRquest(url).text)
+    pageHTML = getHTML(g.sendRquest(url).text)
+    title = locateHTML(pageHTML , title_rule)
+    content = locateHTML(pageHTML , content_rule)
+    #三目判断一下
+    title = title[0] if title else ''  
+    content =  tostring(content[0]) if content else ''
+    #入库
+    storeToDb(title , content , url)
 
-    title = page.xpath(title_rule)
+#保存到数据库
+def storeToDb(title , content , url) :
+    client = mysql().client
 
-    if title == () :
-        title = ''
-    else:
-        title = title[0]
-
-    content = page.xpath(content_rule)
-
-    if content == () :
-        content = ''
-    else:
-        content = tostring(content[0])
-
-    data.append(title)
-    data.append(content)
-    data.append(url)
-    return tuple(data)
-
+    #去重
+    duplicateCheckSql = """SELECT `id` , `url` FROM `articles` WHERE `url` ='%(url)s'  """ % dict(url = url)
+    client.query(duplicateCheckSql)
+    res = client.store_result()
+    if not res.fetch_row(how = 1) :
+        c = client.cursor()
+        c.execute("""INSERT INTO `articles` (`title`,`content`,`url`) VALUES(%s,%s,%s);""",(title , content , url))
+        client.commit()
 
 #发起请求 返回html对象
 def getPage(url , rule):
@@ -95,8 +85,6 @@ def threadCreate(max_workers , fn , *args):
     return futures
 
 start()
-
-
 
 
 
