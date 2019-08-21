@@ -4,11 +4,9 @@ from concurrent.futures import ThreadPoolExecutor
 from lxml.html import fromstring, tostring
 import os
 from db.mysql import mysql
-import chardet
 
 
 def start():
-
     url = 'http://www.roblog.top'
     articles_rule = '//div[@id="main"]/article'
     article_url_rule = './h2/a/@href'
@@ -84,6 +82,3 @@ def threadCreate(max_workers , fn , *args):
     return futures
 
 start()
-
-
-

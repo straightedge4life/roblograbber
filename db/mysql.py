@@ -1,6 +1,5 @@
 import MySQLdb
 
-
 class mysql :
     client = None
     host = '127.0.0.1'
@@ -19,5 +18,3 @@ class mysql :
             db = self.db,
             charset = self.charset
         )
-
-       
