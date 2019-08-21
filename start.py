@@ -1,5 +1,4 @@
 from libs.grabber import grabber
-from libs.locater import locater
 from lxml import etree
 from concurrent.futures import ThreadPoolExecutor
 from lxml.html import fromstring, tostring
