@@ -78,7 +78,6 @@ def threadCreate(max_workers , fn , *args):
          for item in args :
             future = pool.submit(fn , **item)
             futures.append(future)
-    pool.shutdown()
     return futures
 
 start()
