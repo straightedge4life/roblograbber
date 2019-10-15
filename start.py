@@ -14,23 +14,23 @@ def start():
     articles_rule = '//div[@id="main"]/article'
     article_url_rule = './h2/a/@href'
     paginate_rule = '//ol[@class="page-navigator"]/li[last()-1]/a/text()'
-    articles_urls = []
 
     # 先把首页挖出来
-    paginate = get_page(url, paginate_rule)
+    paginate = get_page(url, paginate_rule)[0]
 
     # 根据分页信息获取最大页码，遍历拼接每一页的链接
-    pages = [{'url': url+'/page/'+str(i), 'rule': articles_rule} for i in range(1, int(paginate[0])+1)]
-    
-    # 开线程抓取每页的内容，抓取每页的文章链接
-    articles_futures = thread_create(10, get_page, *pages)
-    for items in articles_futures:
-        for item in items.result():
-            url = locate_html(item, article_url_rule)[0]
-            articles_urls.append({'url': url})
-    
-    # 再开线程抓取每篇文章的内容
-    thread_create(10, get_articles_page, *articles_urls)
+    page_num = range(1, int(paginate) + 1)
+
+    # 构建参数，因为ThreadPoolExecutor.map()方法里面会通过zip()将参数遍历
+    # 然后再调用自身的ThreadPoolExecutor.submit()
+    # 所以结构会是[[参数1, 参数1, 参数1], [参数2, 参数2, 参数2]]
+    pages_args = [[url+'/page/'+str(i) for i in page_num], [articles_rule for i in page_num]]
+
+    with ThreadPoolExecutor(10) as pool:
+        for pre_page in pool.map(get_page, *pages_args):
+            for page_detail_result in pool.map(get_articles_page, [locate_html(item, article_url_rule)[0] for item in pre_page]):
+                print(page_detail_result)
+                print('-------------------------')
 
 
 def get_articles_page(url):
@@ -50,6 +50,7 @@ def get_articles_page(url):
     content = tostring(content[0]) if content else ''
     # 入库
     store_to_db(title, content, url)
+    return 'Article ['+title+'] has been store success!'
 
 
 def store_to_db(title, content, url):
@@ -72,7 +73,7 @@ def store_to_db(title, content, url):
         client.commit()
 
 
-def get_page(url, rule):
+def get_page(url: str, rule: str):
     """
     发起请求 返回html对象
     :param url:
@@ -102,22 +103,7 @@ def locate_html(html, rule):
     :return:
     """
     return html.xpath(rule)
-    
-    
-def thread_create(max_workers, fn, *args):
-    """
-    开线程处理任务
-    :param max_workers:
-    :param fn:
-    :param args:
-    :return:
-    """
-    futures = []
-    with ThreadPoolExecutor(max_workers) as pool:
-        for item in args :
-            future = pool.submit(fn, **item)
-            futures.append(future)
-    return futures
 
 
-start()
+if __name__ == '__main__':
+    start()
