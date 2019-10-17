@@ -1,56 +1,59 @@
-from libs.grabber import Grabber
 from lxml import etree
-from concurrent.futures import ThreadPoolExecutor
-from lxml.html import fromstring, tostring
-from db.mysql import mysql
+from lxml.html import tostring
+from db.mysql import Mysql
+from libs.AsyncGrabber import AsyncGrabber
+import asyncio
 
 
-def start():
+def async_start():
     """
-    开始执行
+    开始爬虫
     :return:
     """
     url = 'http://www.roblog.top'
-    articles_rule = '//div[@id="main"]/article'
-    article_url_rule = './h2/a/@href'
-    paginate_rule = '//ol[@class="page-navigator"]/li[last()-1]/a/text()'
-
-    # 先把首页挖出来
-    paginate = get_page(url, paginate_rule)[0]
-
-    # 根据分页信息获取最大页码，遍历拼接每一页的链接
-    page_num = range(1, int(paginate) + 1)
-
-    # 构建参数，因为ThreadPoolExecutor.map()方法里面会通过zip()将参数遍历
-    # 然后再调用自身的ThreadPoolExecutor.submit()
-    # 所以结构会是[[参数1, 参数1, 参数1], [参数2, 参数2, 参数2]]
-    pages_args = [[url+'/page/'+str(i) for i in page_num], [articles_rule for i in page_num]]
-
-    with ThreadPoolExecutor(10) as pool:
-        for pre_page in pool.map(get_page, *pages_args):
-            for page_detail_result in pool.map(get_articles_page, [locate_html(item, article_url_rule)[0] for item in pre_page]):
-                print(page_detail_result)
-                print('-------------------------')
-
-
-def get_articles_page(url):
-    """
-    专门用来抓取单个文章页
-    :param url: 文章页路径
-    :return:
-    """
+    article_url_rule = '//h2/a/@href'
+    max_page_rule = '//ol[@class="page-navigator"]/li[last()-1]/a/text()'
     title_rule = '/html/body/div/div/div/div[1]/article/h1/a/text()'
     content_rule = '//*[@id="main"]'
-    g = Grabber()
-    page_html = get_html(g.send_request(url).text)
-    title = locate_html(page_html, title_rule)
-    content = locate_html(page_html, content_rule)
-    # 三目判断一下
-    title = title[0] if title else ''  
-    content = tostring(content[0]) if content else ''
-    # 入库
-    store_to_db(title, content, url)
-    return 'Article ['+title+'] has been store success!'
+
+    g = AsyncGrabber()
+    event_loop = asyncio.get_event_loop()
+
+    # 得出首页最大页码数
+    # ps: g.send_request(url)返回response和url，如果只用一个变量接收的话会是一个元组(response, url)
+    result, url = event_loop.run_until_complete(g.send_request(url))
+    max_page = locate_html(etree.HTML(result), max_page_rule)
+    paginate_range = range(1, int(max_page[0]) + 1)
+
+    # 爬取所有列表页的内容
+    tasks = [g.send_request(url + '/page/' + str(i)) for i in paginate_range]
+    results = event_loop.run_until_complete(asyncio.gather(*tasks))
+
+    detail_tasks = []
+
+    # 从每页的列表页提取出文章url
+    for curr_page, url in results:
+        curr_detail_tasks = [
+            g.send_request(article_url)
+            for article_url in locate_html(etree.HTML(curr_page), article_url_rule)
+        ]
+        detail_tasks += curr_detail_tasks
+
+    detail_results = event_loop.run_until_complete(asyncio.gather(*detail_tasks))
+
+    # 爬取每一篇文章
+    for detail_page, detail_url in detail_results:
+        detail_html = etree.HTML(detail_page)
+        title = locate_html(detail_html, title_rule)
+        content = locate_html(detail_html, content_rule)
+        # 三目判断一下
+        title = title[0] if title else ''
+        content = tostring(content[0]) if content else ''
+        # 入库
+        if store_to_db(title, content, detail_url):
+            print('Article [' + title + '] has been store success!')
+        else:
+            print('Article [' + title + '] has been store fail!')
 
 
 def store_to_db(title, content, url):
@@ -61,7 +64,7 @@ def store_to_db(title, content, url):
     :param url:
     :return:
     """
-    client = mysql().client
+    client = Mysql().client
 
     # 去重
     duplicate_check_sql = """SELECT `id` , `url` FROM `articles` WHERE `url` ='%(url)s'  """ % dict(url=url)
@@ -71,28 +74,9 @@ def store_to_db(title, content, url):
         c = client.cursor()
         c.execute("""INSERT INTO `articles` (`title`,`content`,`url`) VALUES(%s,%s,%s);""", (title, content, url))
         client.commit()
-
-
-def get_page(url: str, rule: str):
-    """
-    发起请求 返回html对象
-    :param url:
-    :param rule:
-    :return:
-    """
-    g = Grabber()
-    html = get_html(g.send_request(url).text)
-    target_html = locate_html(html, rule)
-    return target_html
-
-
-def get_html(response):
-    """
-    解析html
-    :param response:
-    :return:
-    """
-    return etree.HTML(response)
+        return True
+    else:
+        return False
 
 
 def locate_html(html, rule):
@@ -106,4 +90,4 @@ def locate_html(html, rule):
 
 
 if __name__ == '__main__':
-    start()
+    async_start()
